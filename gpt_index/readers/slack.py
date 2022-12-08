@@ -2,6 +2,9 @@
 import logging
 import os
 from typing import Any, List, Optional
+import time
+from tqdm import tqdm
+import streamlit as st
 
 from gpt_index.readers.base import BaseReader
 from gpt_index.schema import Document
@@ -46,8 +49,9 @@ class SlackReader(BaseReader):
         while True:
             # https://slack.com/api/conversations.replies
             # List all replies to a message, including the message itself.
+            time.sleep(1)
             result = self.client.conversations_replies(
-                channel=channel_id, ts=message_ts, cursor=next_cursor
+                channel=channel_id, ts=message_ts, cursor=next_cursor, limit=1000
             )
             try:
                 messages = result["messages"]
@@ -60,6 +64,7 @@ class SlackReader(BaseReader):
                 next_cursor = result["response_metadata"]["next_cursor"]
             except SlackApiError as e:
                 logger.error("Error parsing conversation replies: {}".format(e))
+                break
 
         return "\n\n".join(messages_text)
 
@@ -71,34 +76,38 @@ class SlackReader(BaseReader):
         result_messages = []
         next_cursor = None
         while True:
+            time.sleep(1)
             result = self.client.conversations_history(
-                channel=channel_id, cursor=next_cursor
+                channel=channel_id, cursor=next_cursor, limit=1000
             )
             try:
                 # Call the conversations.history method using the WebClient
                 # conversations.history returns the first 100 messages by default
                 # These results are paginated,
                 # see: https://api.slack.com/methods/conversations.history$pagination
-                result = self.client.conversations_history(channel=channel_id)
+                time.sleep(1)
+                result = self.client.conversations_history(channel=channel_id, limit=1000)
                 conversation_history = result["messages"]
                 # Print results
                 logger.info(
                     "{} messages found in {}".format(len(conversation_history), id)
                 )
-                for message in conversation_history:
+                for message in tqdm(conversation_history, "Reading messages"):
                     result_messages.append(
                         self._read_message(channel_id, message["ts"])
                     )
 
-                if not result["has_more"]:
-                    break
+                # if not result["has_more"]:
+                break
                 next_cursor = result["response_metadata"]["next_cursor"]
 
             except SlackApiError as e:
                 logger.error("Error creating conversation: {}".format(e))
+                break
 
         return "\n\n".join(result_messages)
 
+    @st.cache
     def load_data(self, **load_kwargs: Any) -> List[Document]:
         """Load data from the input directory."""
         channel_ids = load_kwargs.pop("channel_ids", None)
